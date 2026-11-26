@@ -1,0 +1,25 @@
+diff --git a/envpool/core/env.h b/envpool/core/env.h
+--- a/envpool/core/env.h
++++ b/envpool/core/env.h
+@@ -221,2 +221,6 @@
+  protected:
++  // Perpetua modification: expose the counter to the CartPole snapshot subclass.
++  int SnapshotStepCount() const { return current_step_; }
++  void RestoreStepCount(int value) { current_step_ = value; }
++
+   // Same-step autoreset implementations publish the terminal transition before
+diff --git a/envpool/core/async_envpool.h b/envpool/core/async_envpool.h
+--- a/envpool/core/async_envpool.h
++++ b/envpool/core/async_envpool.h
+@@ -45,2 +45,4 @@
+   std::atomic<std::size_t> stepping_env_num_;
++  // Perpetua modification: Recv may unblock before the worker finishes unwinding.
++  std::atomic<std::size_t> running_env_num_{0};
+   std::vector<std::thread> workers_;
+@@ -131,4 +133,6 @@
+           bool reset = raw_action.force_reset || envs_[env_id]->IsDone();
++          ++running_env_num_;
+           envs_[env_id]->EnvStep(state_buffer_queue_.get(), order, reset,
+                                  raw_action.force_reset);
++          --running_env_num_;
+         }

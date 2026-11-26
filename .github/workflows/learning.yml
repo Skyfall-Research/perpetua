@@ -1,0 +1,80 @@
+name: Learning regression guard
+# PPO, DQN and SAC must keep beating seeded random references across seeds
+# (scripts/learning_guard.py). Too slow for every push, so it runs nightly and
+# when learner code changes.
+on:
+  push:
+    paths:
+      - 'src/perpetua/agents/**'
+      - 'src/perpetua/runtime.py'
+      - 'src/perpetua/metrics.py'
+      - 'scripts/learning_guard.py'
+      - 'src/perpetua/torch_bridge.py'
+      - 'tests/test_torch_bridge.py'
+      - 'scripts/measure_baseline.py'
+      - 'tests/test_scripts.py'
+      - 'tests/conftest.py'
+      - '.github/workflows/learning.yml'
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  # A newer push to the same branch or PR supersedes the running checks; main keeps every run.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: '0.11.23'
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Ten seeds per learner against random references
+        run: uv run python scripts/learning_guard.py --seeds 10
+  # Not named `torch`: that is the required check of ci.yml.
+  torch-guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: '0.11.23'
+          enable-cache: true
+      - run: uv sync --locked
+      # A CPU wheel keeps the job small (the lockfile's Linux torch pulls CUDA).
+      # Its version and its dependencies are the lockfile's: the export constrains
+      # both, and best-match prefers the +cpu build of that version.
+      - name: Install the locked torch as a CPU wheel
+        run: |
+          uv export --locked --no-hashes --no-default-groups --extra torch --no-emit-project -o "$RUNNER_TEMP/torch-lock.txt"
+          uv pip install --python .venv/bin/python torch --constraint "$RUNNER_TEMP/torch-lock.txt" \
+            --default-index https://pypi.org/simple --index https://download.pytorch.org/whl/cpu \
+            --index-strategy unsafe-best-match
+          .venv/bin/python -c "import torch; assert torch.__version__.endswith('+cpu'), torch.__version__"
+      # Every test with the `torch` marker, as in the torch job of ci.yml,
+      # which runs them on pull requests.
+      - name: Run the torch-gated tests (none may skip)
+        run: |
+          .venv/bin/python -m pytest -q -rs -m torch --junitxml="$RUNNER_TEMP/torch-tests.xml"
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          suite = ET.parse(os.environ['RUNNER_TEMP'] + '/torch-tests.xml').getroot().find('testsuite')
+          skipped = [case.get('name') for case in suite.iter('testcase') if case.find('skipped') is not None]
+          assert suite.findall('testcase') and not skipped, f'torch tests were skipped: {skipped}'
+          PY
+      - name: Torch PPO against random references
+        run: .venv/bin/python scripts/learning_guard.py --algorithms torch-ppo --seeds 10

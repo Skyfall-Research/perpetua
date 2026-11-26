@@ -1,0 +1,48 @@
+# One grouped pull request a month per ecosystem: new releases of the pinned
+# actions and of the locked Python dependencies reach a maintainer without
+# anyone having to look.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns: ['*']
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      python:
+        patterns: ['*']
+    # An entry without `versions` or `update-types` ignores every new version
+    # of that dependency. These are moved by hand, with the pins they depend on.
+    ignore:
+      # Pinned to one nightly on purpose; the stable-tfp job of integrations.yml
+      # reports when the pin can be dropped.
+      - dependency-name: tfp-nightly
+      # MuJoCo and MJX are pinned to the same version and have to move
+      # together: MJX 4.0.1 beside MuJoCo 3.3.0 failed for want of that
+      # release's MuJoCo library.
+      - dependency-name: mujoco
+      - dependency-name: mujoco-mjx
+      # Pinned to an exact release in pyproject.toml; moved by hand, with the
+      # gymnax adapter.
+      - dependency-name: gymnax
+      # Pinned to an exact release in pyproject.toml; moved by hand, with the
+      # Meta-World adapter and the Continual World presets built on it.
+      - dependency-name: metaworld
+      # MEAL and the distrax release it needs are pinned exactly, together
+      # with tfp-nightly above; they move as one set.
+      - dependency-name: meal-bench
+      - dependency-name: distrax
+      # JAX is capped below 0.12 on purpose (a 0.x minor release removes
+      # APIs), and jaxlib has to match it. Patch releases still arrive.
+      - dependency-name: jax
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
+      - dependency-name: jaxlib
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
