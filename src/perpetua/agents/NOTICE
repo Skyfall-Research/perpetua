@@ -1,0 +1,15 @@
+Perpetua's continuing PPO implementation adapts PureJaxRL's PPO reference:
+https://github.com/luchris429/purejaxrl/blob/31756b197773a52db763fdbe6d635e4b46522a73/purejaxrl/ppo.py
+
+Copyright 2023 Chris Lu. Upstream license: Apache License, Version 2.0.
+See LICENSE-PureJaxRL, distributed alongside this notice.
+
+Modifications: continuing lifetime interface and GAE; removal of episodic
+resets, done masks, offline episode logs and finite-budget learning-rate
+annealing; keyed action masks; active-slot weighting; numeric PPO state with
+exact update clocks; bounded rollout chunks; health checks; configuration and
+full-state checkpoint integration; shared PPO optimization for host-controlled
+CPU simulator rollouts. Uses JAX categorical primitives instead
+of adding Distrax/gymnax wrapper dependencies.
+
+This attribution does not select the license for the rest of Perpetua.

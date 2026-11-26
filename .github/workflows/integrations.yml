@@ -1,0 +1,139 @@
+name: Native benchmark runtimes
+# COOM and AgarCL run in their own pinned runtimes, which the main CPU job does
+# not build. This workflow builds them (cached by their pinned commits and
+# setup modules) and runs their tests across Linux releases and architectures.
+on:
+  push:
+    paths:
+      - 'src/perpetua/adapters/agarcl*.py'
+      - 'src/perpetua/adapters/coom*.py'
+      - 'src/perpetua/adapters/worker.py'
+      - 'src/perpetua/adapters/host.py'
+      - 'src/perpetua/adapters/bridge.py'
+      - 'tests/test_compiled_bridge.py'
+      - 'scripts/setup_agarcl.py'
+      - 'scripts/setup_coom.py'
+      - 'scripts/soak.py'
+      - 'tests/test_agarcl.py'
+      - 'tests/test_coom.py'
+      - 'tests/test_worker.py'
+      - 'tests/test_runtime_setup.py'
+      - 'tests/test_environment_docs.py'
+      - 'scripts/generate_env_docs.py'
+      - 'scripts/env_content.py'
+      - 'docs/environments/agarcl-*.md'
+      - 'docs/environments/coom-*.md'
+      - '.github/workflows/integrations.yml'
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  # A newer push to the same branch or PR supersedes the running checks; main keeps every run.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+env:
+  # The main CI's interpreter (.python-version). 3.13, the other supported
+  # version, is covered by the python-313 job of ci.yml.
+  UV_PYTHON: '3.12'
+jobs:
+  agarcl:
+    name: AgarCL (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: ubuntu-22.04-x86_64, runner: ubuntu-22.04, container: '' }
+          - { name: ubuntu-24.04-x86_64, runner: ubuntu-24.04, container: '' }
+          - { name: ubuntu-24.04-aarch64, runner: ubuntu-24.04-arm, container: '' }
+          - { name: debian-12-x86_64, runner: ubuntu-24.04, container: 'debian:12' }
+    steps:
+      - name: Prerequisites a user provides (base toolchain, apt lists, Mesa EGL for no-GPU hosts)
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends build-essential git curl ca-certificates \
+            libegl-mesa0 libgl1-mesa-dri
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: '0.11.23'
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/perpetua/agarcl
+          # This file is part of the key because it pins setup-uv and uv: the
+          # cached environment links to the Python that uv installed, and
+          # another setup-uv release keeps that Python somewhere else.
+          key: agarcl-${{ matrix.name }}-${{ hashFiles('.github/workflows/integrations.yml', 'src/perpetua/adapters/agarcl_setup.py', 'src/perpetua/adapters/agarcl.py') }}
+      - run: uv sync --locked --no-default-groups --extra training
+      - run: uv run --no-default-groups --extra training python -m perpetua.adapters.agarcl_setup
+      - name: AgarCL and worker tests (none may skip)
+        shell: bash  # bash -eo pipefail: a pytest failure must fail the step
+        run: >-
+          uv run --no-default-groups --group integration --extra training pytest -q -rs
+          tests/test_agarcl.py tests/test_worker.py tests/test_environment_conformance.py
+          tests/test_compiled_bridge.py tests/test_environment_docs.py -k "agarcl or worker"
+          | tee pytest.log && ! grep -q "AgarCL runtime not installed" pytest.log
+
+  coom:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: '0.11.23'
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/perpetua/coom
+          # Keyed by this file too, for the reason given in the agarcl job.
+          key: coom-${{ hashFiles('.github/workflows/integrations.yml', 'src/perpetua/adapters/coom_setup.py', 'src/perpetua/adapters/coom.py') }}
+      - run: uv sync --locked --no-default-groups --extra training
+      - run: uv run --no-default-groups --extra training python -m perpetua.adapters.coom_setup
+      - name: COOM tests (none may skip)
+        shell: bash  # bash -eo pipefail: a pytest failure must fail the step
+        run: >-
+          uv run --no-default-groups --group integration --extra training pytest -q -rs
+          tests/test_coom.py tests/test_environment_conformance.py tests/test_compiled_bridge.py
+          tests/test_environment_docs.py -k "coom"
+          | tee pytest.log && ! grep -q "COOM runtime not installed" pytest.log
+
+  stable-tfp:
+    # MEAL's distribution dependency needs tfp-nightly: stable
+    # tensorflow-probability 0.25.0 calls jax.interpreters.xla.pytype_aval_mappings,
+    # which JAX 0.11 removed. This fails (deliberately) once a stable release works.
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: '0.11.23'
+      - name: Try the newest stable TensorFlow Probability with the pinned JAX
+        run: |
+          uv venv --python 3.12 probe
+          uv pip install --python probe/bin/python "jax==0.11.2" "distrax==0.1.9" tensorflow-probability
+          # On Linux distrax also pulls tfp-nightly, which installs the same
+          # tensorflow_probability module and would mask the stable release.
+          uv pip uninstall --python probe/bin/python tfp-nightly || true
+          uv pip install --python probe/bin/python --reinstall tensorflow-probability
+          version=$(probe/bin/python -c "import importlib.metadata as m; print(m.version('tensorflow-probability'))")
+          probe/bin/python -c "
+          import importlib.metadata as m
+          names = {d.metadata['Name'].lower() for d in m.distributions()}
+          assert 'tfp-nightly' not in names, 'tfp-nightly would mask the stable release'
+          "
+          if probe/bin/python -c "
+          import jax, jax.numpy as jnp, distrax
+          from tensorflow_probability.substrates import jax as tfp
+          distrax.Categorical(logits=jnp.zeros(3)).sample(seed=jax.random.key(0))
+          tfp.distributions.Normal(0.0, 1.0).sample(seed=jax.random.key(1))
+          "; then
+            echo "::error::Stable tensorflow-probability $version now works with JAX 0.11.2; replace tfp-nightly in pyproject.toml."
+            exit 1
+          fi
+          echo "::notice::Stable tensorflow-probability $version is still incompatible; keep tfp-nightly."

@@ -1,0 +1,133 @@
+[build-system]
+requires = ["hatchling>=1.32,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "perpetua-rl"
+version = "0.0.1a0"
+description = "A lifetime-first interface for continual reinforcement learning"
+license = "MIT"
+readme = "README.md"
+authors = [{ name = "Skyfall Research" }]
+keywords = [
+    "reinforcement-learning",
+    "continual-learning",
+    "continual-reinforcement-learning",
+    "non-stationarity",
+    "multi-agent",
+    "jax",
+    "gymnasium",
+]
+requires-python = ">=3.12,<3.14"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "jax>=0.11.2,<0.12",
+    "gymnasium>=1.4,<2",
+    "orbax-checkpoint>=0.12.7,<0.13",
+]
+
+[project.urls]
+Repository = "https://github.com/Skyfall-Research/perpetua"
+Documentation = "https://github.com/Skyfall-Research/perpetua/tree/main/docs"
+Issues = "https://github.com/Skyfall-Research/perpetua/issues"
+
+[project.optional-dependencies]
+cuda13 = ["jax[cuda13]>=0.11.2,<0.12; sys_platform == 'linux'"]
+training = ["flax>=0.12.10,<0.13", "optax>=0.2.8,<0.3"]
+# gymnax 0.0.9 imports six undeclared; python-dateutil 4 stopped providing it.
+interop = ["gymnax==0.0.9", "six>=1.16"]
+cpu-bridge = ["envpool>=1.2.7,<1.3; sys_platform == 'linux'"]
+marl = ["pettingzoo>=1.27,<1.28", "mpe2>=1.1.1,<1.2"]
+jaxmarl = ["jaxmarl>=0.2,<0.3", "six>=1.16"]
+meal = ["meal-bench==0.3.1", "six>=1.16", "distrax==0.1.9", "tfp-nightly==0.26.0.dev20261030"]
+metaworld = ["metaworld==3.1.1", "gymnasium[mujoco]>=1.4,<2"]
+morpheus = ["httpx>=0.28,<1"]
+mjx = ["mujoco-mjx==3.3.0", "mujoco==3.3.0"]
+torch = ["torch>=2.8,<3"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1,<10",
+    "pytest-timeout>=2.3,<3",
+    "pytest-xdist>=3.6,<4",
+    "hypothesis>=6.140,<7",
+    "ruff>=0.17,<0.18",
+    "pyright>=1.1.414,<2",
+    "flax>=0.12.10,<0.13",
+    "optax>=0.2.8,<0.3",
+    "gymnax==0.0.9",
+    "six>=1.16",
+    "envpool>=1.2.7,<1.3; sys_platform == 'linux'",
+    "pettingzoo>=1.27,<1.28",
+    "mpe2>=1.1.1,<1.2",
+    "jaxmarl>=0.2,<0.3",
+    "metaworld==3.1.1",
+    "gymnasium[mujoco]>=1.4,<2",
+    "httpx>=0.28,<1",
+    "mujoco-mjx==3.3.0",
+    "pytest-split>=0.10,<1",
+    "pytest-cov>=6,<8",
+]
+# MEAL needs a nightly TensorFlow Probability. It is installed by default and
+# left out with `uv sync --no-group meal`, so a problem with it stops only MEAL.
+meal = ["meal-bench==0.3.1", "six>=1.16", "distrax==0.1.9", "tfp-nightly==0.26.0.dev20261030"]
+# The documentation build: `uv run --group docs sphinx-build -W docs _build/html`.
+docs = ["sphinx>=9.1,<10", "furo>=2025.12.19", "myst-parser>=5.2,<6"]
+# The test runner of the native-runtime CI jobs, which install without `dev`.
+integration = ["pytest>=9.1,<10"]
+
+[tool.uv]
+default-groups = ["dev", "meal"]
+
+# Records the source commit in the built wheel and sdist (hatch_build.py).
+[tool.hatch.build.hooks.custom]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/perpetua"]
+
+# The sdist carries the tests and docs, not the CI files or the slide deck.
+[tool.hatch.build.targets.sdist]
+exclude = ["/.github", "/.test_durations", "/docs/slides"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "BLE", "C4", "C90", "PIE", "PT", "RET", "SIM"]
+# SIM105/SIM108: an explicit try/except/pass with its comment, and an if/else
+# with long arms, read better than contextlib.suppress and a ternary.
+ignore = ["SIM105", "SIM108"]
+
+[tool.ruff.lint.mccabe]
+# The current maximum, so complexity can only go down.
+max-complexity = 30
+
+[tool.pyright]
+include = ["src", "scripts", "tests", "examples"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+strict = ["src", "tests"]
+
+[tool.coverage.run]
+source = ["perpetua"]
+branch = true
+# The CI groups run on separate machines; relative paths let them combine.
+relative_files = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers"]
+markers = [
+    "torch: needs the optional torch extra; tests/conftest.py skips it without torch, and the torch CI jobs run `pytest -m torch`.",
+]
+# A hung test fails instead of stalling the run; the longest scripts take about 20 minutes.
+timeout = 1800
