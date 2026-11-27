@@ -146,6 +146,28 @@ of `ci.yml`; both jobs fail if one of those tests is skipped. The eight test
 groups have no torch and skip the marked tests. CI passes `-rs`, so each
 job's log lists what it skipped and why.
 
+## Releasing
+
+Releases are published by `.github/workflows/release.yml` with PyPI trusted
+publishing; no API token exists to store or leak. The distribution is
+`perpetua-rl`.
+
+1. Set `version` in `pyproject.toml` and merge it to `main`. A version can be
+   uploaded to each index only once, even after it is deleted there.
+2. Optionally run the workflow by hand (Actions, Release, Run workflow). It
+   builds, checks and publishes to TestPyPI only; install from there with
+   `uv pip install --index-url https://test.pypi.org/simple/ --extra-index-url
+   https://pypi.org/simple/ perpetua-rl` to try it.
+3. Publish a GitHub release whose tag is `v` followed by the version, such as
+   `v0.0.1a0`. The workflow refuses a tag that does not match, checks that
+   the wheel records the tagged commit, publishes to TestPyPI (skipping files
+   a manual run already uploaded) and then waits for a reviewer of the `pypi`
+   environment to approve the PyPI upload.
+
+The trusted publishers are registered on PyPI and TestPyPI for this
+repository, the workflow `release.yml` and the environments `pypi` and
+`testpypi`.
+
 ## Licence
 
 Perpetua is MIT-licensed. By contributing you agree that your contribution is

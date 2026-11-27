@@ -1,0 +1,92 @@
+# Publishes the wheel and sdist with PyPI trusted publishing: no API token is
+# stored anywhere. A manual run builds and publishes to TestPyPI only. A
+# published GitHub release builds, publishes to TestPyPI, then to PyPI once a
+# reviewer of the `pypi` environment approves. A version can be uploaded to
+# each index only once.
+name: Release
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # No cache: a release is built from a clean toolchain.
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: '0.11.23'
+      - name: Check that the release tag names the package version
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
+          if [ "$TAG" != "v$version" ]; then
+            echo "Release tag $TAG does not match the package version $version (expected v$version)."
+            exit 1
+          fi
+      - run: uv build
+      - name: Check the distributions
+        run: uvx twine@7.0.0 check --strict dist/*
+      - name: Check that the wheel installs and records this commit
+        run: |
+          uv venv .wheel-test --python 3.12
+          uv pip install --python .wheel-test/bin/python dist/*.whl
+          .wheel-test/bin/python -I - <<'PY'
+          import os
+          import perpetua as pp
+          found = pp.reporting.provenance()
+          assert found["revision"] == os.environ["GITHUB_SHA"], found
+          assert found["dirty"] is False, found
+          print(found)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+  testpypi:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/perpetua-rl
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # A manual run may already have uploaded this version.
+          skip-existing: true
+  pypi:
+    if: github.event_name == 'release'
+    needs: testpypi
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/perpetua-rl
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
